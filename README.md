@@ -1,2 +1,1 @@
-# linkedin-automated-sourcing
-
+# User manual + API docs (via Swagger)
