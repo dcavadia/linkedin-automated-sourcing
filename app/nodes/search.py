@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -69,6 +70,92 @@ def init_driver():
     time.sleep(3)
     return _driver
 
+def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, Any]) -> float:
+    """Calculate weighted relevance score (0-100) based on 4 filters with priorities."""
+    headline = profile_data.get('headline', '').lower()
+    scraped_location = profile_data.get('location', '').lower()
+    scraped_company = profile_data.get('current_company', '').lower()
+    est_exp = profile_data.get('experience_years', 3)
+    base_keywords = ' '.join(config.get('keywords', ['AI Engineer'])).lower()
+    location_filter = config.get('location', '').lower()
+    company_filter = config.get('company', '').lower()
+    min_exp = config.get('min_exp', 0)
+
+    score = 0
+
+    # Keywords (35 pts - high priority)
+    keyword_words = base_keywords.split()
+    if base_keywords in headline:
+        score += 35  # Exact
+    elif any(word in headline for word in keyword_words):
+        score += 20  # Partial
+    keyword_pts = score
+
+    # Location (35 pts - high priority)
+    loc_pts = 0
+    if location_filter:
+        if location_filter in scraped_location:
+            loc_pts = 35  # Exact
+        else:
+            # Fuzzy: Check for key cities/regions (customizable dict)
+            fuzzy_map = {
+                'venezuela': ['caracas', 'maracaibo', 'south america', 'latam', 'colombia', 'bogota'],
+                'germany': ['berlin', 'munich', 'europe'],
+                # Add more as needed
+            }
+            fuzzy_terms = fuzzy_map.get(location_filter, [])
+            if any(term in scraped_location for term in fuzzy_terms):
+                loc_pts = 20  # Partial/fuzzy
+        score += loc_pts
+    else:
+        loc_pts = 35  # No filter, full credit
+
+    # Company (20 pts - medium priority)
+    comp_pts = 0
+    if company_filter:
+        if company_filter in scraped_company:
+            comp_pts = 20  # Exact
+        else:
+            # Simple fuzzy: variants like "corp", "inc"
+            fuzzy_company = company_filter.replace(' ', '')  # e.g., "nvidia corp" -> "nvidiacorp"
+            if fuzzy_company in scraped_company.replace(' ', ''):
+                comp_pts = 10  # Partial
+        score += comp_pts
+    else:
+        comp_pts = 20  # No filter, full
+
+    # Experience (10 pts - low priority)
+    exp_pts = 0
+    if min_exp == 0:
+        exp_pts = 5  # Baseline if no filter
+    elif est_exp >= min_exp:
+        exp_pts = 10  # Full
+    elif est_exp >= (min_exp * 0.5) or 'senior' in headline or 'lead' in headline:
+        exp_pts = 5  # Partial
+    score += exp_pts
+
+    total_score = round(score, 1)
+    print(f"DEBUG: Score calc - Keywords:{keyword_pts}, Loc:{loc_pts}, Comp:{comp_pts}, Exp:{exp_pts} → Total: {total_score}/100")
+    return total_score
+
+def estimate_experience(headline: str, card_text: str, min_exp: int) -> int:
+    """Estimate years from headline/card text (enhanced for reliability)."""
+    full_text = headline + ' ' + card_text
+    # Regex for years (improved)
+    years_match = re.search(r'(\d+)\s*(?:years?|años|yr|yrs)', full_text)
+    if years_match:
+        return int(years_match.group(1))
+    # Fuzzy words (expanded)
+    if any(word in full_text for word in ['senior', 'lead', 'principal']):
+        return max(7, min_exp)  # Assume 7+ for senior roles
+    if any(word in full_text for word in ['mid', 'intermediate']):
+        return max(4, min_exp // 2)
+    if any(word in full_text for word in ['entry', 'junior', 'intern']):
+        return 2
+    if 'experienced' in full_text or 'expert' in full_text:
+        return max(10, min_exp)
+    return min_exp if min_exp > 0 else 3  # Default
+
 def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     driver = init_driver()
     base_keywords = ' '.join(config.get('keywords', ['AI Engineer']))
@@ -136,8 +223,7 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         card_text = card.get_text()[:200] + "..." if len(card.get_text()) > 200 else card.get_text()
         print(f"DEBUG: Card {i+1} sample text: '{card_text}'")
 
-    profiles = []  # Only add if all matches
-    exp_years = min_exp if min_exp > 0 else 3  # Default/fuzzy for cards
+    profiles = []  # All candidates added, with scores
     keyword_lower = base_keywords.lower()
     t14_divs = None  # For headline/location
 
@@ -187,35 +273,44 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             scraped_company = scraped_company.lower().replace(',', '')  # Clean
             print(f"DEBUG: Candidate {i+1} company: '{scraped_company}'")
 
-            # Exp: Fuzzy - if "senior" or min_exp in headline, bump; else default
-            if min_exp > 0 and any(word in headline for word in ['senior', 'lead', f'{min_exp}+', f'{min_exp} years']):
-                exp_years = max(exp_years, min_exp + 1)
+            # Exp: Enhanced estimation
+            card_text = card.get_text()
+            exp_years = estimate_experience(headline, card_text, min_exp)
 
-            # Matches
-            keyword_match = keyword_lower in headline
-            location_match = location in scraped_location if location else True
-            company_match = company in scraped_company if company else True
-            exp_match = exp_years >= min_exp
+            # Temp profile data for scoring
+            temp_data = {
+                'headline': headline,
+                'location': scraped_location,
+                'current_company': scraped_company,
+                'experience_years': exp_years
+            }
 
-            print(f"DEBUG: Candidate {i+1} ({name}) matches - keywords: {keyword_match} (in '{headline}'), location: {location_match} ('{location}' in '{scraped_location}'), company: {company_match} ('{company}' in '{scraped_company}'), exp: {exp_match} ({exp_years} >= {min_exp})")
+            # Calculate score
+            relevance_score = calculate_relevance_score(temp_data, config)
 
-            if keyword_match and location_match and company_match and exp_match:
-                print(f"DEBUG: All matches - adding {name} to pool.")
-                profiles.append({
-                    'id': profile_url.split('/in/')[-1].split('/')[0] if '/in/' in profile_url else f'candidate_{i+1}',
-                    'name': name,
-                    'skills': [base_keywords],
-                    'experience_years': exp_years,
-                    'location': scraped_location,
-                    'current_company': scraped_company,
-                })
-            else:
-                print(f"DEBUG: Candidate {i+1} failed verification - skipped.")
+            print(f"DEBUG: Candidate {i+1} ({name}) relevance score: {relevance_score}/100")
+
+            # Always add to pool with score
+            profiles.append({
+                'id': profile_url.split('/in/')[-1].split('/')[0] if '/in/' in profile_url else f'candidate_{i+1}',
+                'name': name,
+                'skills': [base_keywords],
+                'experience_years': exp_years,
+                'location': scraped_location,
+                'current_company': scraped_company,
+                'profile_url': profile_url,
+                'relevance_score': relevance_score
+            })
 
         except Exception as e:
             print(f"DEBUG: Error processing card {i+1}: {e}")
             if t14_divs:
                 print(f"DEBUG: Available t-14 divs: {[d.get_text(strip=True)[:50] for d in t14_divs]}")
 
-    print(f"DEBUG: Total matching profiles added to pool: {len(profiles)}")
+    print(f"DEBUG: Total candidates added to pool (with scores): {len(profiles)}")
+    # Sort by score descending for frontend
+    profiles.sort(key=lambda x: x['relevance_score'], reverse=True)
+    driver.quit()
     return profiles
+
+# search_node omitted - add if needed
