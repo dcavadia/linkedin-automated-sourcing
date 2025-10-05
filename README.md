@@ -1,1 +1,2 @@
-# User manual + API docs (via Swagger)
+uvicorn app.main:app --reload
+npm start
