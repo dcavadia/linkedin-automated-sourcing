@@ -1,26 +1,22 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, List
 import uvicorn
-from app.database import get_all_interactions
+from app.database import get_all_interactions, init_db, get_candidates, save_candidates
+from app.database import update_message_status, get_messages_for_candidate  # Added missing imports
 from datetime import datetime
 from statistics import mean  # For avg response time
 from fastapi.responses import StreamingResponse
 import csv
 from io import StringIO
-from fastapi import Body
 import os
 from dotenv import load_dotenv
-from app.database import save_candidates, get_candidates  # New
 from app.nodes.search import search_linkedin  # Fixed import path
-load_dotenv()  # Load .env for EMAIL/PASSWORD
-
-
-
-
-from app.nodes.message_generator import create_and_save_message, get_messages_for_candidate
+from app.nodes.message_generator import create_and_save_message
 from app.database import update_response
+
+load_dotenv()  # Load .env for EMAIL/PASSWORD
 
 app = FastAPI(title="Message Generator API")
 
@@ -36,27 +32,57 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+init_db()  # Ensure DB ready on startup
+
 class CandidateData(BaseModel):
-    id: str
+    id: str  # linkedin_id
     name: str
-    experience: str | None = None
-    current_company: str | None = None
+    experience: str | None = None  # Temp for message gen (not saved)
+    current_company: str | None = None  # Temp for message gen
+    role_desc: str | None = None  # New: Optional
+    cta: str | None = None  # New: Optional
 
 class ResponseData(BaseModel):
     msg_id: int
     response: str
 
+# New: SearchConfig model (replaces dict=Body for validation)
+class SearchConfig(BaseModel):
+    keywords: List[str] = ["AI Engineer"]
+    location: str = ""
+    company: str = ""
+    min_exp: int = 0
+    max_results: int = 10  # Optional, pass to search if limiting cards
+
 @app.post("/generate")
 def generate_message(candidate: CandidateData) -> Dict[str, Any]:
     try:
-        result = create_and_save_message(candidate.dict())
+        result = create_and_save_message(candidate.dict(exclude_unset=True), candidate.role_desc, candidate.cta)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/accept-message/{msg_id}")
+def accept_message(msg_id: int):
+    try:
+        updated = update_message_status(msg_id, 'sent')
+        if updated:
+            return {"status": "accepted", "msg_id": msg_id, "updated": True}
+        else:
+            raise HTTPException(status_code=404, detail="Message not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/track/{candidate_id}")
 def get_tracking(candidate_id: str) -> list[Dict[str, Any]]:
-    return get_messages_for_candidate(candidate_id)
+    messages = get_messages_for_candidate(candidate_id)  # Now imported
+    # Convert datetimes
+    for m in messages:
+        if m['sent_date']:
+            m['sent_date'] = m['sent_date'].isoformat() if hasattr(m['sent_date'], 'isoformat') else str(m['sent_date'])
+        if m['response_date']:
+            m['response_date'] = m['response_date'].isoformat() if hasattr(m['response_date'], 'isoformat') else str(m['response_date'])
+    return messages
 
 @app.post("/update-response")
 def log_response(data: ResponseData):
@@ -150,34 +176,38 @@ def export_report():
         headers={"Content-Disposition": f"attachment; filename=linkedin_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"}
     )
 
+# Updated: POST /search with Pydantic model
 @app.post("/search")
-def perform_search(config: dict = Body(...)):
+def perform_search(config: SearchConfig):
     """Trigger LinkedIn search with filters, save profiles to DB."""
     try:
-        # Call your search.py function
-        profiles = search_linkedin(config)  # config = {"keywords": [...], "location": "Venezuela", "company": "Google", "min_exp": 2}
+        # Pass max_results if implemented in search.py (optional)
+        config_dict = config.dict()
+        if config.max_results:
+            config_dict['max_results'] = config.max_results  # Add to search_linkedin if limiting
         
-        # Save to DB (deduped)
+        # Call your search.py function
+        profiles = search_linkedin(config_dict)  # config = {"keywords": [...], "location": "Venezuela", ...}
+        
+        # Save to DB (deduped, simplified)
         saved_count = save_candidates(profiles)
         
-        # Fetch updated candidates for response (all saved)
+        # Fetch updated candidates for response (all saved, simplified)
         all_candidates = get_candidates()
         
         return {
-            "profiles_found": profiles,
+            "profiles_found": profiles,  # Full for results preview
             "saved_to_db": saved_count,
             "total_candidates": len(all_candidates),
-            "candidates": all_candidates[-saved_count:] if saved_count > 0 else []  # Last saved
+            "candidates": all_candidates  # Simplified (no temp fields)
         }
     except Exception as e:
-        return {"error": f"Search failed: {str(e)}. Check .env creds, CAPTCHA, or LinkedIn access."}
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}. Check .env creds, CAPTCHA, or LinkedIn access.")
 
-# New: GET /candidates (for frontend to view saved)
+# Existing: GET /candidates (simplified)
 @app.get("/candidates")
 def list_candidates():
     return get_candidates()
-
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

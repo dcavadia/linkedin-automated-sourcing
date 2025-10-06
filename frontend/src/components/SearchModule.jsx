@@ -2,26 +2,38 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:8000';
+const DEFAULT_ROLE_DESC = "AI Engineer role at our innovative startup, focusing on ML pipelines and computer vision.";
+const DEFAULT_CTA = "Please reply if interested in discussing this opportunity further.";
 
 const SearchModule = () => {
   const [config, setConfig] = useState({
-    keywords: 'AI Engineer',  // String or array; backend joins
+    keywords: 'AI Engineer',  // String; split to array in handleSearch
     location: 'Venezuela',
     company: '',
     min_exp: 2,
-    max_results: 10  // Pass to search.py if you add limit there (e.g., profile_cards[:max_results])
+    max_results: 10  // Optional
   });
-  const [results, setResults] = useState([]);
-  const [savedCandidates, setSavedCandidates] = useState([]);
+  const [results, setResults] = useState([]);  // Full profiles from search
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Fetch saved candidates on load
+  // Message Gen State (Inline per Candidate)
+  const [showGenForm, setShowGenForm] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [genCandidate, setGenCandidate] = useState({ id: '', name: '', experience: '', current_company: '' });
+  const [roleDesc, setRoleDesc] = useState(DEFAULT_ROLE_DESC);
+  const [cta, setCta] = useState(DEFAULT_CTA);
+  const [genMessage, setGenMessage] = useState('');
+  const [genLoading, setGenLoading] = useState(false);
+
+  // Fetch saved candidates on load (for potential use, but not displayed)
   useEffect(() => {
     const fetchCandidates = async () => {
       try {
         const res = await axios.get(`${API_BASE}/candidates`);
-        setSavedCandidates(res.data);
+        // Sort by relevance_score DESC (not displayed)
+        const sorted = res.data.sort((a, b) => b.relevance_score - a.relevance_score);
+        // Keep for future, but no UI
       } catch (err) {
         console.error('Failed to load candidates:', err);
       }
@@ -33,15 +45,21 @@ const SearchModule = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await axios.post(`${API_BASE}/search`, config);
+      // Prepare config: Split keywords to array
+      const configData = {
+        ...config,
+        keywords: config.keywords.split(' ').filter(Boolean)  // e.g., "AI Engineer ML" → ["AI", "Engineer", "ML"]
+      };
+      const res = await axios.post(`${API_BASE}/search`, configData);
       if (res.data.error) {
         setError(res.data.error);
       } else {
-        setResults(res.data.profiles_found || []);
-        setSavedCandidates(res.data.candidates || []);  // Update with new saved
+        // Sort results by score DESC
+        const sortedResults = (res.data.profiles_found || []).sort((a, b) => b.relevance_score - a.relevance_score);
+        setResults(sortedResults);
       }
     } catch (err) {
-      setError('Search failed: ' + err.message + '. Check console/backend logs.');
+      setError('Search failed: ' + err.response?.data?.detail || err.message + '. Check console/backend logs.');
     } finally {
       setLoading(false);
     }
@@ -49,26 +67,63 @@ const SearchModule = () => {
 
   const handleConfigChange = (e) => {
     const { name, value } = e.target;
-    setConfig({ ...config, [name]: name === 'keywords' ? value.split(' ') : value });  // Split keywords to array
-    if (name === 'min_exp') setConfig({ ...config, [name]: parseInt(value) || 0 });
+    setConfig({ ...config, [name]: name === 'min_exp' ? parseInt(value) || 0 : value });
   };
 
-  const handleGenerateMessage = (candidate) => {
-    // Integrate with MessageGenerator: Pre-fill form with candidate data
-    alert(`Generate message for ${candidate.name} (ID: ${candidate.id})\nExperience: ${candidate.experience_years} years ${candidate.skills.join(', ')}\nCompany: ${candidate.current_company}\n(Implement: Navigate to MessageGenerator with these values)`);
-    // Todo: Use React Router or state to pass to MessageGenerator (e.g., set global state)
+  const handleGenerateMessage = (profile) => {
+    // Pre-fill form with simplified data from profile
+    const exp = `AI Engineer based on skills: ${Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}`;
+    setGenCandidate({
+      id: profile.id || profile.linkedin_id,
+      name: profile.name,
+      experience: exp,
+      current_company: 'N/A'  // Simplified
+    });
+    setRoleDesc(DEFAULT_ROLE_DESC);
+    setCta(DEFAULT_CTA);
+    setGenMessage('');
+    setSelectedCandidate(profile);
+    setShowGenForm(true);
+  };
+
+  const submitGenerate = async () => {
+    if (!genCandidate.id || !genCandidate.name) {
+      alert('Candidate data incomplete.');
+      return;
+    }
+    setGenLoading(true);
+    try {
+      const postData = {
+        ...genCandidate,
+        role_desc: roleDesc,
+        cta: cta
+      };
+      const res = await axios.post(`${API_BASE}/generate`, postData);
+      setGenMessage(res.data.message);
+      alert(`Message generated and saved for ${genCandidate.name}! Track in Dashboard.`);
+      setShowGenForm(false);  // Hide form
+    } catch (err) {
+      alert('Error generating message: ' + err.response?.data?.detail || err.message);
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
+  const cancelGen = () => {
+    setShowGenForm(false);
+    setGenMessage('');
   };
 
   return (
     <div style={{ maxWidth: 800, margin: 'auto', padding: 20 }}>
       <h2>LinkedIn Search Module (Using search.py)</h2>
-      <p>Configure filters and trigger search to find AI candidates. Results populate the DB pipeline.</p>
+      <p>Configure filters and trigger search to find AI candidates. Click "Generate Message" to personalize outreach.</p>
       
       {/* Filters Form (Grid Layout) */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
         <input
           name="keywords"
-          placeholder="Keywords (e.g., AI Engineer ML)"
+          placeholder="Keywords (space-sep, e.g., AI Engineer ML)"
           value={config.keywords}
           onChange={handleConfigChange}
           style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}
@@ -115,19 +170,19 @@ const SearchModule = () => {
       
       {error && <p style={{ color: 'red', marginBottom: 10 }}>{error}</p>}
       
-      {/* Search Results Table */}
+      {/* Search Results Table (Full Profiles for Preview, Minimal Columns) */}
       {results.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <h3>Search Results ({results.length} Found)</h3>
+          <h3>Search Results ({results.length} Found, Sorted by Score)</h3>
           <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: '#f0f0f0' }}>
                 <th>Name</th>
                 <th>Skills</th>
-                <th>Experience (Years)</th>
+                <th>Relevance Score</th>
                 <th>Location</th>
-                <th>Current Company</th>
                 <th>Profile URL</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -135,49 +190,12 @@ const SearchModule = () => {
                 <tr key={idx}>
                   <td>{profile.name}</td>
                   <td>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
-                  <td>{profile.experience_years}</td>
+                  <td>{profile.relevance_score}/100</td>
                   <td>{profile.location}</td>
-                  <td>{profile.current_company}</td>
                   <td><a href={profile.profile_url} target="_blank" rel="noopener noreferrer">View</a></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      
-      {/* Saved Candidates Table (From DB) */}
-      <div>
-        <h3>Saved Candidates in Pipeline ({savedCandidates.length})</h3>
-        {savedCandidates.length === 0 ? (
-          <p>No candidates saved yet. Run a search!</p>
-        ) : (
-          <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f0f0f0' }}>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Skills</th>
-                <th>Experience</th>
-                <th>Location</th>
-                <th>Company</th>
-                <th>Search Date</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {savedCandidates.map((candidate) => (
-                <tr key={candidate.id}>
-                  <td>{candidate.id}</td>
-                  <td>{candidate.name}</td>
-                  <td>{candidate.skills}</td>
-                  <td>{candidate.experience_years}</td>
-                  <td>{candidate.location}</td>
-                  <td>{candidate.current_company}</td>
-                  <td>{new Date(candidate.search_date).toLocaleString()}</td>
                   <td>
                     <button 
-                      onClick={() => handleGenerateMessage(candidate)} 
+                      onClick={() => handleGenerateMessage(profile)} 
                       style={{ padding: '4px 8px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: 2 }}
                     >
                       Generate Message
@@ -187,8 +205,51 @@ const SearchModule = () => {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Inline Message Gen Form (Per Candidate) */}
+      {showGenForm && selectedCandidate && (
+        <div style={{ backgroundColor: '#f9f9f9', padding: 20, borderRadius: 8, marginTop: 20 }}>
+          <h3>Generate Message for {genCandidate.name}</h3>
+          <p><strong>Pre-filled Data:</strong> ID: {genCandidate.id} | Experience: {genCandidate.experience} | Company: {genCandidate.current_company}</p>
+          <div style={{ marginBottom: 10 }}>
+            <label>Brief Role Description:</label>
+            <textarea
+              value={roleDesc}
+              onChange={(e) => setRoleDesc(e.target.value)}
+              placeholder="e.g., AI Engineer focusing on computer vision and ML pipelines"
+              style={{ width: '100%', height: 80, padding: 8, border: '1px solid #ccc', borderRadius: 4, marginTop: 5 }}
+            />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label>Clear Call to Action:</label>
+            <input
+              type="text"
+              value={cta}
+              onChange={(e) => setCta(e.target.value)}
+              placeholder="e.g., Reply to schedule a quick call"
+              style={{ width: '100%', padding: 8, border: '1px solid #ccc', borderRadius: 4, marginTop: 5 }}
+            />
+          </div>
+          <button 
+            onClick={submitGenerate} 
+            disabled={genLoading}
+            style={{ padding: '8px 16px', backgroundColor: genLoading ? '#6c757d' : '#28a745', color: 'white', border: 'none', borderRadius: 4, marginRight: 10 }}
+          >
+            {genLoading ? 'Generating...' : 'Generate & Save'}
+          </button>
+          <button onClick={cancelGen} style={{ padding: '8px 16px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: 4 }}>
+            Cancel
+          </button>
+          {genMessage && (
+            <div style={{ marginTop: 20, padding: 15, backgroundColor: 'white', border: '1px solid #ddd', borderRadius: 4 }}>
+              <h4>Generated Message:</h4>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{genMessage}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

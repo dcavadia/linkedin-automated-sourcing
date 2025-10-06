@@ -12,7 +12,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 import time
-# from app.state import Candidate  # Commented: Not used
+
+# Import database functions from parent directory
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.database import init_db, save_candidates
 
 load_dotenv()
 EMAIL = os.getenv('LINKEDIN_EMAIL')
@@ -91,21 +96,12 @@ def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, An
         score += 20  # Partial
     keyword_pts = score
 
-    # Location (35 pts - high priority)
+    # Location (35 pts - high priority, exact only)
     loc_pts = 0
     if location_filter:
         if location_filter in scraped_location:
-            loc_pts = 35  # Exact
-        else:
-            # Fuzzy: Check for key cities/regions (customizable dict)
-            fuzzy_map = {
-                'venezuela': ['caracas', 'maracaibo', 'south america', 'latam', 'colombia', 'bogota'],
-                'germany': ['berlin', 'munich', 'europe'],
-                # Add more as needed
-            }
-            fuzzy_terms = fuzzy_map.get(location_filter, [])
-            if any(term in scraped_location for term in fuzzy_terms):
-                loc_pts = 20  # Partial/fuzzy
+            loc_pts = 35  # Exact substring (e.g., "germany" in "kaiserslautern, germany")
+        # No fuzzy/partial – strict match only
         score += loc_pts
     else:
         loc_pts = 35  # No filter, full credit
@@ -116,7 +112,7 @@ def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, An
         if company_filter in scraped_company:
             comp_pts = 20  # Exact
         else:
-            # Simple fuzzy: variants like "corp", "inc"
+            # Simple fuzzy: variants like "corp", "inc" (kept as basic)
             fuzzy_company = company_filter.replace(' ', '')  # e.g., "nvidia corp" -> "nvidiacorp"
             if fuzzy_company in scraped_company.replace(' ', ''):
                 comp_pts = 10  # Partial
@@ -138,6 +134,7 @@ def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, An
     print(f"DEBUG: Score calc - Keywords:{keyword_pts}, Loc:{loc_pts}, Comp:{comp_pts}, Exp:{exp_pts} → Total: {total_score}/100")
     return total_score
 
+
 def estimate_experience(headline: str, card_text: str, min_exp: int) -> int:
     """Estimate years from headline/card text (enhanced for reliability)."""
     full_text = headline + ' ' + card_text
@@ -157,13 +154,16 @@ def estimate_experience(headline: str, card_text: str, min_exp: int) -> int:
     return min_exp if min_exp > 0 else 3  # Default
 
 def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # Init DB on search start
+    init_db()
+    
     driver = init_driver()
     base_keywords = ' '.join(config.get('keywords', ['AI Engineer']))
     location = config.get('location', '').strip().lower()
     company = config.get('company', '').strip().lower()
     min_exp = config.get('min_exp', 0)
 
-    # Build boolean query (same as before)
+    # Build boolean query (unchanged)
     query_parts = [f'"{base_keywords}"']  # Exact phrase
     if location:
         query_parts.append(f'AND "{config["location"]}"')  # Use original case for query
@@ -229,9 +229,10 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for i, card in enumerate(profile_cards):
         try:
-            # Name: Robust - a with /in/ href, span dir=ltr
+            # Name: Robust - a with /in/ href, span dir=ltr (cleaned)
             name_elem = card.select_one('a[href*="/in/"] span[dir="ltr"]')
-            name = name_elem.get_text(strip=True).strip() if name_elem else f'Candidate {i+1}'
+            full_name = name_elem.get_text(strip=True).strip() if name_elem else f'Candidate {i+1}'
+            name = full_name.split('View')[0].strip().split('’s profile')[0].strip()  # Clean artifacts
             link_elem = card.select_one('a[href*="/in/"]')
             profile_url = link_elem['href'] if link_elem else ''
 
@@ -262,7 +263,7 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
             print(f"DEBUG: Candidate {i+1} location: '{scraped_location}'")
 
-            # Current company: Parse from headline (e.g., after "at " or "|")
+            # Current company: Parse from headline (e.g., after "at " or "|") - for scoring only
             scraped_company = 'N/A'
             if ' at ' in headline:
                 scraped_company = headline.split(' at ')[-1].split(' |')[0].split(' ·')[0].strip()
@@ -270,10 +271,12 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 scraped_company = headline.split(' | ')[-1].split(' ·')[0].strip()
             elif ' · ' in headline:
                 scraped_company = headline.split(' · ')[-1].strip()
+            elif '@' in headline:  # Enhanced for "@ company"
+                scraped_company = headline.split('@')[-1].split()[0].strip()
             scraped_company = scraped_company.lower().replace(',', '')  # Clean
             print(f"DEBUG: Candidate {i+1} company: '{scraped_company}'")
 
-            # Exp: Enhanced estimation
+            # Exp: Enhanced estimation - for scoring only
             card_text = card.get_text()
             exp_years = estimate_experience(headline, card_text, min_exp)
 
@@ -290,14 +293,18 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
             print(f"DEBUG: Candidate {i+1} ({name}) relevance score: {relevance_score}/100")
 
-            # Always add to pool with score
+            # Clean linkedin_id: username only (split '?' for params)
+            linkedin_id_raw = profile_url.split('/in/')[-1].split('/')[0] if '/in/' in profile_url else f'candidate_{i+1}'
+            linkedin_id = linkedin_id_raw.split('?')[0]  # Remove "?miniProfileUrn..."
+
+            # Always add to pool with score (full for now; subset saved)
             profiles.append({
-                'id': profile_url.split('/in/')[-1].split('/')[0] if '/in/' in profile_url else f'candidate_{i+1}',
+                'id': linkedin_id,  # Now clean linkedin_id
                 'name': name,
                 'skills': [base_keywords],
-                'experience_years': exp_years,
-                'location': scraped_location,
-                'current_company': scraped_company,
+                'experience_years': exp_years,  # Internal only
+                'location': scraped_location,  # Internal only
+                'current_company': scraped_company,  # Internal only
                 'profile_url': profile_url,
                 'relevance_score': relevance_score
             })
@@ -310,7 +317,16 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     print(f"DEBUG: Total candidates added to pool (with scores): {len(profiles)}")
     # Sort by score descending for frontend
     profiles.sort(key=lambda x: x['relevance_score'], reverse=True)
+    
+    # Save to DB (subset only)
+    saved = save_candidates(profiles)
+    print(f"DEBUG: Saved {saved} new candidates to database.")
+    
     driver.quit()
     return profiles
 
-# search_node omitted - add if needed
+# search_node: Example integration (uncomment/adapt for LangGraph/FastAPI)
+# def search_node(state: Dict[str, Any]) -> Dict[str, Any]:
+#     config = state.get('config', {})  # From input
+#     profiles = search_linkedin(config)
+#     return {'candidates': profiles, 'search_complete': True}
