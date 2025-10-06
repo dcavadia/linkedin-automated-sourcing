@@ -11,13 +11,16 @@ const Dashboard = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
+      setError('');
       try {
-        const [metricsRes, interactionsRes] = await Promise.all([
-          axios.get(`${API_BASE}/metrics`),
-          axios.get(`${API_BASE}/interactions`)
-        ]);
-        setMetrics(metricsRes.data);
-        setInteractions(interactionsRes.data.slice(0, 10));  // Recent 10
+        // Fetch metrics (expecting old keys: total_messages_sent, total_replies, reply_rate_percent, avg_response_time_days)
+        const metricsRes = await axios.get(`${API_BASE}/metrics`);
+        setMetrics(metricsRes.data || {});
+
+        // Fetch interactions (recent first, slice to 10 on client side to maintain old behavior)
+        const interactionsRes = await axios.get(`${API_BASE}/interactions`);
+        setInteractions(interactionsRes.data || []);
       } catch (err) {
         setError('Failed to load dashboard: ' + (err.response?.data?.detail || err.message));
       } finally {
@@ -33,26 +36,37 @@ const Dashboard = () => {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `report_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', `candidate-report-${new Date().toISOString().split('T')[0]}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();
+      window.URL.revokeObjectURL(url);
       alert('Report exported! 📊');
     } catch (err) {
-      alert('Export failed: ' + err.message);
+      alert('Export failed: ' + (err.response?.data?.detail || err.message));
     }
   };
 
-  if (loading) return <p style={{ textAlign: 'center', padding: 40, color: '#007bff' }}>Loading dashboard... 📈</p>;
-  if (error) return <p style={{ color: '#dc3545', textAlign: 'center', padding: 40 }}>{error}</p>;
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: 40, color: '#6c757d' }}>Loading dashboard... ⏳</div>;
+  }
+
+  if (error) {
+    return <p style={{ color: '#dc3545', textAlign: 'center', padding: 40 }}>{error}</p>;
+  }
 
   return (
-    <div style={{ maxWidth: 1000, margin: 0 }}>
+    <div style={{ maxWidth: 1200, margin: 0 }}>
       <h2 style={{ color: '#495057', marginBottom: 20 }}>📈 Candidate Dashboard</h2>
-      <p style={{ color: '#6c757d', marginBottom: 20 }}>Overview of outreach effectiveness and recent activity.</p>
+      <p style={{ color: '#6c757d', marginBottom: 30 }}>Overview of outreach efforts and recent interactions. Export for full reports.</p>
 
-      {/* Metrics Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20, marginBottom: 30 }}>
+      {/* Metrics Cards - Restored old key usage and display logic */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+        gap: 20, 
+        marginBottom: 30 
+      }}>
         <div style={{ 
           backgroundColor: '#fff', 
           padding: 20, 
@@ -99,60 +113,90 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Export Button */}
-      <button 
-        onClick={handleExport}
-        style={{ 
-          padding: '12px 24px', 
-          backgroundColor: '#28a745', 
-          color: 'white', 
-          border: 'none', 
-          borderRadius: 6, 
-          cursor: 'pointer',
-          fontSize: '16px',
-          marginBottom: 20
-        }}
-      >
-        Export Report 📊 (CSV)
-      </button>
-
-      {/* Recent Interactions Table */}
       <div style={{ 
-        backgroundColor: '#fff', 
-        padding: 20, 
-        borderRadius: 8, 
-        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-        border: '1px solid #e9ecef'
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: 20 
       }}>
-        <h3 style={{ color: '#495057', marginBottom: 15 }}>Recent Interactions (Top 10) 📋</h3>
-        <div style={{ overflowX: 'auto' }}>
+        <h3 style={{ color: '#495057', margin: 0 }}>Recent Interactions (Top 10) 📋</h3>
+        <button 
+          onClick={handleExport}
+          style={{ 
+            padding: '10px 20px', 
+            backgroundColor: '#28a745', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: 6, 
+            cursor: 'pointer',
+            fontSize: '14px'
+          }}
+        >
+          Export Report 📊 CSV
+        </button>
+      </div>
+
+      {interactions.length === 0 ? (
+        <div style={{ 
+          backgroundColor: '#fff', 
+          padding: 40, 
+          borderRadius: 8, 
+          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+          border: '1px solid #e9ecef',
+          textAlign: 'center',
+          color: '#6c757d'
+        }}>
+          <p>No interactions yet. Send some messages first! ✉️</p>
+        </div>
+      ) : (
+        <div style={{ 
+          backgroundColor: '#fff', 
+          padding: 20, 
+          borderRadius: 8, 
+          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+          border: '1px solid #e9ecef',
+          overflowX: 'auto'
+        }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
               <tr style={{ backgroundColor: '#f8f9fa' }}>
-                <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Candidate</th>
+                <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Msg ID</th>
+                <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Candidate ID</th>
+                <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Name</th>
                 <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Status</th>
                 <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Sent</th>
                 <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Response</th>
               </tr>
             </thead>
             <tbody>
-              {interactions.map((int, idx) => (
+              {interactions.slice(0, 10).map((msg, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
-                  <td style={{ padding: 12 }}>{int.candidate_name || 'N/A'}</td>
-                  <td style={{ padding: 12, color: int.status === 'replied' ? '#28a745' : '#007bff' }}>{int.status}</td>
-                  <td style={{ padding: 12 }}>{int.sent_date || 'N/A'}</td>
-                  <td style={{ padding: 12 }}>{int.response ? 'Yes 💬' : 'No'}</td>
+                  <td style={{ padding: 12 }}>{msg.id || 'N/A'}</td>
+                  <td style={{ padding: 12, fontSize: '12px', color: '#6c757d' }}>
+                    {msg.candidate_id 
+                      ? msg.candidate_id.substring(0, 20) + (msg.candidate_id.length > 20 ? '...' : '') 
+                      : 'N/A'
+                    }
+                  </td>
+                  <td style={{ padding: 12, fontWeight: 'bold' }}>{msg.candidate_name || 'Unknown'}</td>
+                  <td style={{ 
+                    padding: 12, 
+                    color: msg.status === 'replied' ? '#28a745' : (msg.status === 'sent' ? '#007bff' : '#6c757d')
+                  }}>
+                    {msg.status || 'N/A'}
+                  </td>
+                  <td style={{ padding: 12 }}>
+                    {msg.sent_date ? new Date(msg.sent_date).toLocaleDateString() : 'N/A'}
+                  </td>
+                  <td style={{ padding: 12, maxWidth: 200 }}>
+                    {msg.response ? msg.response.substring(0, 50) + '...' : 'No'}
+                  </td>
                 </tr>
               ))}
-              {interactions.length === 0 && (
-                <tr>
-                  <td colSpan="4" style={{ padding: 40, textAlign: 'center', color: '#6c757d' }}>No interactions yet. Start outreach! 🚀</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
-      </div>
+      )}
     </div>
   );
 };
