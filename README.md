@@ -151,6 +151,31 @@ For advanced usage, customize prompts in `message_generator.py` or add WebSocket
 - **🔄 Real-time Updates:** WebSocket support for live search progress and notifications.
 - **🧪 Observability:** Logging and metrics for scraping success rates and API health.
 
+## 📊 Relevance Scoring
+
+The relevance score (0-100) quantitatively evaluates how well a scraped LinkedIn candidate matches the search query and filters. This score is computed in `search.py` during the scraping process using the `calculate_relevance_score` function and stored in the SQLite database (along with a detailed `score_breakdown` dict) for sorting, filtering, and UI visualization. Higher scores indicate better alignment, with thresholds like >70 for prioritization. Scores are sorted descending in results, and debug logs provide transparency during searches.
+
+### Scoring Components
+The score is a simple additive sum of points from four categories, with no further normalization or weighting beyond the fixed maximums (total max: 100 points). Fuzzy matching is integrated into location and company checks using `difflib.SequenceMatcher` (for similarity ratios >70%) and geocoding (via Nominatim API for country-level matching). Experience estimation uses the `estimate_experience` function, which parses regex patterns (e.g., "5 years") or heuristics (e.g., "senior" → 7+ years).
+
+| Component              | Max Points (Effective %) | Details |
+|------------------------|--------------------------|---------|
+| **Keyword Matching**  | 50 points (50%)         | Full exact match of query keywords (e.g., "AI Engineer") in headline/description: +50. Partial match (any keyword word): +25. Uses simple string containment; no advanced TF-IDF. |
+| **Location Matching** | 20 points (20%)         | No filter: +20. Exact match: +20. Country match (geocoded): +15. Fuzzy match (>70% similarity): +10. No match: +0. |
+| **Company Matching**  | 20 points (20%)         | No filter: +20. Exact match in description: +20. Fuzzy substring match (spaces removed): +10. No match: +0. |
+| **Experience Alignment** | 10 points (10%)     | No min_exp: +5. Estimated years >= min_exp (full match): +10. Partial (half min_exp or keywords like "senior"/"experienced"): +5. No match: +0. Estimation defaults to 3 years if unclear. |
+
+### Calculation Formula
+
+```bash
+score = keyword_points + location_points + company_points + experience_points
+```
+
+- Each component awards fixed points based on matches; total is rounded to 1 decimal.
+- Example: Keywords (full: 50), Location (exact: 20), Company (fuzzy: 10), Experience (partial: 5) → Total: 85/100.
+- Breakdown Example: `{'keywords': 50, 'location': 20, 'company': 10, 'experience': 5, 'total': 85}`. This is logged via `print` statements and saved to DB for potential UI breakdown (e.g., tooltips).
+- Customization: Points and thresholds are hardcoded in `search.py`; modify for tuning (e.g., increase keyword weight for role-specific searches). Scores are recalculated on re-scrapes.
+
 ## 🗂️ Project Structure
 
 ### Mermaid Diagram
