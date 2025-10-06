@@ -5,26 +5,24 @@ from typing import Dict, Any, List
 DB_PATH = "candidates.db"
 
 def init_db():
-    """Initialize DB tables and run migrations."""
+    """Initialize tables and apply migrations."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Messages table (full schema)
+
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            candidate_id TEXT NOT NULL,
-            candidate_name TEXT,
-            current_company TEXT,
-            message TEXT NOT NULL,
-            sent_date TIMESTAMP,
-            response TEXT,
-            response_date TIMESTAMP,
-            status TEXT DEFAULT 'generated'
-        )
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_id TEXT NOT NULL,
+        candidate_name TEXT,
+        current_company TEXT,
+        message TEXT NOT NULL,
+        sent_date TIMESTAMP,
+        response TEXT,
+        response_date TIMESTAMP,
+        status TEXT DEFAULT 'generated'
+    )
     """)
-    
-    # Migrations for messages table
+
     cursor.execute("PRAGMA table_info(messages)")
     columns = [col[1] for col in cursor.fetchall()]
     if 'candidate_name' not in columns:
@@ -35,38 +33,35 @@ def init_db():
         cursor.execute("ALTER TABLE messages ADD COLUMN response_date TIMESTAMP")
     if 'status' not in columns:
         cursor.execute("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'generated'")
-    
-    # Candidates table (simplified: key fields for frontend)
+
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            linkedin_id TEXT UNIQUE NOT NULL,
-            profile_url TEXT,
-            name TEXT NOT NULL,
-            skills TEXT,  -- Comma-separated string
-            relevance_score REAL DEFAULT 0.0,
-            search_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
+    CREATE TABLE IF NOT EXISTS candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        linkedin_id TEXT UNIQUE NOT NULL,
+        profile_url TEXT,
+        name TEXT NOT NULL,
+        skills TEXT,
+        relevance_score REAL DEFAULT 0.0,
+        search_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
     """)
-    
-    # Migrations for candidates (if needed)
+
     cursor.execute("PRAGMA table_info(candidates)")
     columns = [col[1] for col in cursor.fetchall()]
     if 'linkedin_id' not in columns:
         cursor.execute("ALTER TABLE candidates ADD COLUMN linkedin_id TEXT UNIQUE NOT NULL DEFAULT 'unknown'")
     if 'relevance_score' not in columns:
         cursor.execute("ALTER TABLE candidates ADD COLUMN relevance_score REAL DEFAULT 0.0")
-    
+
     conn.commit()
     conn.close()
 
 def save_message(candidate_id: str, candidate_name: str, current_company: str, message: str) -> int:
-    """Save generated message (status='generated', no sent_date yet). Returns msg_id."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        """INSERT INTO messages (candidate_id, candidate_name, current_company, message, status) 
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO messages (candidate_id, candidate_name, current_company, message, status)
+        VALUES (?, ?, ?, ?, ?)""",
         (candidate_id, candidate_name, current_company, message, 'generated')
     )
     conn.commit()
@@ -75,7 +70,6 @@ def save_message(candidate_id: str, candidate_name: str, current_company: str, m
     return msg_id
 
 def update_message_status(msg_id: int, status: str = 'sent') -> bool:
-    """Update message status; if 'sent', also set sent_date. Returns True if updated."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     if status == 'sent':
@@ -91,7 +85,6 @@ def update_message_status(msg_id: int, status: str = 'sent') -> bool:
     return updated
 
 def update_response(msg_id: int, response: str) -> bool:
-    """Update response, status='replied', and response_date. Returns True if updated."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -104,13 +97,12 @@ def update_response(msg_id: int, response: str) -> bool:
     return updated
 
 def get_messages_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
-    """Fetch all messages for a candidate ID."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, candidate_id, candidate_name, current_company, message, sent_date, response, 
-                  response_date, status 
-           FROM messages WHERE candidate_id = ? ORDER BY id DESC""",
+        """SELECT id, candidate_id, candidate_name, current_company, message, sent_date, response,
+        response_date, status
+        FROM messages WHERE candidate_id = ? ORDER BY id DESC""",
         (candidate_id,)
     )
     rows = cursor.fetchall()
@@ -131,13 +123,12 @@ def get_messages_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
     ]
 
 def get_all_interactions() -> List[Dict[str, Any]]:
-    """Fetch all messages for dashboard (recent first)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, candidate_id, candidate_name, current_company, message, sent_date, response, 
-                  response_date, status 
-           FROM messages ORDER BY sent_date DESC, id DESC"""
+        """SELECT id, candidate_id, candidate_name, current_company, message, sent_date, response,
+        response_date, status
+        FROM messages ORDER BY sent_date DESC, id DESC"""
     )
     rows = cursor.fetchall()
     conn.close()
@@ -157,7 +148,6 @@ def get_all_interactions() -> List[Dict[str, Any]]:
     ]
 
 def save_candidates(profiles: List[Dict[str, Any]]) -> int:
-    """Save list of profiles to candidates table (deduped by linkedin_id). Returns saved count."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     saved_count = 0
@@ -168,8 +158,8 @@ def save_candidates(profiles: List[Dict[str, Any]]) -> int:
         skills_str = ','.join(profile.get('skills', [])) if isinstance(profile.get('skills'), list) else str(profile.get('skills', ''))
         relevance_score = float(profile.get('relevance_score', 0.0))
         cursor.execute(
-            """INSERT OR IGNORE INTO candidates (linkedin_id, profile_url, name, skills, relevance_score) 
-               VALUES (?, ?, ?, ?, ?)""",
+            """INSERT OR IGNORE INTO candidates (linkedin_id, profile_url, name, skills, relevance_score)
+            VALUES (?, ?, ?, ?, ?)""",
             (linkedin_id, profile_url, name, skills_str, relevance_score)
         )
         if cursor.rowcount > 0:
@@ -179,7 +169,6 @@ def save_candidates(profiles: List[Dict[str, Any]]) -> int:
     return saved_count
 
 def get_candidates() -> List[Dict[str, Any]]:
-    """Fetch all saved candidates (for generator list)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT id, linkedin_id, profile_url, name, skills, relevance_score, search_date FROM candidates ORDER BY search_date DESC")
@@ -191,12 +180,11 @@ def get_candidates() -> List[Dict[str, Any]]:
             "linkedin_id": row[1],
             "profile_url": row[2],
             "name": row[3],
-            "skills": row[4],  # String, can split if needed
+            "skills": row[4],
             "relevance_score": row[5],
             "search_date": row[6]
         }
         for row in rows
     ]
 
-# Initialize on import
 init_db()

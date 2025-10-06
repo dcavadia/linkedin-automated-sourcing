@@ -14,11 +14,9 @@ const Dashboard = () => {
       setLoading(true);
       setError('');
       try {
-        // Fetch metrics (expecting old keys: total_messages_sent, total_replies, reply_rate_percent, avg_response_time_days)
         const metricsRes = await axios.get(`${API_BASE}/metrics`);
         setMetrics(metricsRes.data || {});
 
-        // Fetch interactions (recent first, slice to 10 on client side to maintain old behavior)
         const interactionsRes = await axios.get(`${API_BASE}/interactions`);
         setInteractions(interactionsRes.data || []);
       } catch (err) {
@@ -60,7 +58,6 @@ const Dashboard = () => {
       <h2 style={{ color: '#495057', marginBottom: 20 }}>📈 Candidate Dashboard</h2>
       <p style={{ color: '#6c757d', marginBottom: 30 }}>Overview of outreach efforts and recent interactions. Export for full reports.</p>
 
-      {/* Metrics Cards - Restored old key usage and display logic */}
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 

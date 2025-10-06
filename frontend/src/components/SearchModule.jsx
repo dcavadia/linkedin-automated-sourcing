@@ -5,24 +5,21 @@ const API_BASE = 'http://localhost:8000';
 
 const SearchModule = () => {
   const [config, setConfig] = useState({
-    keywords: 'AI Engineer',  // String; split to array in handleSearch
+    keywords: 'AI Engineer',
     location: 'Venezuela',
     company: '',
     min_exp: 2,
-    max_results: 10  // Optional
+    max_results: 10
   });
-  const [results, setResults] = useState([]);  // Full profiles from search
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Fetch saved candidates on load (for potential use, but not displayed)
   useEffect(() => {
     const fetchCandidates = async () => {
       try {
         const res = await axios.get(`${API_BASE}/candidates`);
-        // Sort by relevance_score DESC (not displayed)
         const sorted = res.data.sort((a, b) => b.relevance_score - a.relevance_score);
-        // Keep for future, but no UI
       } catch (err) {
         console.error('Failed to load candidates:', err);
       }
@@ -34,16 +31,14 @@ const SearchModule = () => {
     setLoading(true);
     setError('');
     try {
-      // Prepare config: Split keywords to array
       const configData = {
         ...config,
-        keywords: config.keywords.split(' ').filter(Boolean)  // e.g., "AI Engineer ML" → ["AI", "Engineer", "ML"]
+        keywords: config.keywords.split(' ').filter(Boolean)
       };
       const res = await axios.post(`${API_BASE}/search`, configData);
       if (res.data.error) {
         setError(res.data.error);
       } else {
-        // Sort results by score DESC
         const sortedResults = (res.data.profiles_found || []).sort((a, b) => b.relevance_score - a.relevance_score);
         setResults(sortedResults);
         alert(`Found ${sortedResults.length} candidates – saved to DB! 🔍 Use Message Generator next.`);
@@ -60,7 +55,6 @@ const SearchModule = () => {
     setConfig({ ...config, [name]: name === 'min_exp' ? parseInt(value) || 0 : value });
   };
 
-  // New: Helper to generate concise breakdown tooltip
   const getBreakdownTooltip = (breakdown) => {
     if (!breakdown || typeof breakdown !== 'object') return '';
     const { keywords = 0, location = 0, company = 0, experience = 0, total } = breakdown;
@@ -72,7 +66,6 @@ const SearchModule = () => {
       <h2 style={{ color: '#495057', marginBottom: 20 }}>🔍 LinkedIn Candidate Search</h2>
       <p style={{ color: '#6c757d', marginBottom: 20 }}>Search for AI talent and save results to your database. Results auto-save for use in other modules.</p>
       
-      {/* Filters Form (Grid Layout) */}
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: '1fr 1fr', 
@@ -134,7 +127,6 @@ const SearchModule = () => {
       
       {error && <p style={{ color: '#dc3545', marginBottom: 20, padding: 10, backgroundColor: '#f8d7da', borderRadius: 6, border: '1px solid #f5c6cb' }}>{error}</p>}
       
-      {/* Search Results Table */}
       {results.length > 0 && (
         <div style={{ 
           backgroundColor: '#fff', 
@@ -157,13 +149,13 @@ const SearchModule = () => {
               </thead>
               <tbody>
                 {results.map((profile, idx) => {
-                  const tooltip = getBreakdownTooltip(profile.score_breakdown);  // New: Get tooltip
+                  const tooltip = getBreakdownTooltip(profile.score_breakdown);
                   return (
                     <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
                       <td style={{ padding: 12 }}>{profile.name}</td>
                       <td style={{ padding: 12 }}>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
                       <td style={{ padding: 12 }}>
-                        {/* Updated: Add title tooltip for breakdown summary */}
+
                         <span 
                           title={tooltip} 
                           style={{ 
@@ -175,7 +167,7 @@ const SearchModule = () => {
                           }}
                         >
                           {profile.relevance_score}/100
-                          <span style={{ marginLeft: '4px', fontSize: '12px' }}>ℹ️</span>  {/* Visual cue */}
+                          <span style={{ marginLeft: '4px', fontSize: '12px' }}>ℹ️</span>
                         </span>
                       </td>
                       <td style={{ padding: 12 }}>{profile.location}</td>

@@ -6,9 +6,9 @@ const DEFAULT_ROLE_DESC = "AI Engineer role at our innovative startup, focusing 
 const DEFAULT_CTA = "Please reply if interested in discussing this opportunity further.";
 
 const MessageGenerator = () => {
-  const [candidates, setCandidates] = useState([]);  // From /candidates
+  const [candidates, setCandidates] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [msgId, setMsgId] = useState(null);  // Fixed: Store message ID from /generate response
+  const [msgId, setMsgId] = useState(null);
   const [roleDesc, setRoleDesc] = useState(DEFAULT_ROLE_DESC);
   const [cta, setCta] = useState(DEFAULT_CTA);
   const [message, setMessage] = useState('');
@@ -47,7 +47,7 @@ const MessageGenerator = () => {
       };
       const res = await axios.post(`${API_BASE}/generate`, postData);
       setMessage(res.data.message);
-      setMsgId(res.data.id);  // Fixed: Capture msg_id (int, e.g., 23) from response
+      setMsgId(res.data.id);
       alert(`Message generated for ${selectedCandidate.name}! Review and accept below. ✉️`);
     } catch (err) {
       setError('Error generating: ' + (err.response?.data?.detail || err.message));
@@ -61,22 +61,22 @@ const MessageGenerator = () => {
     setRoleDesc(DEFAULT_ROLE_DESC);
     setCta(DEFAULT_CTA);
     setMessage('');
-    setMsgId(null);  // Fixed: Reset msgId on new selection
+    setMsgId(null);
     setError('');
   };
 
   const acceptMessage = async () => {
-    if (!msgId) {  // Fixed: Check for msgId
+    if (!msgId) {
       alert('Generate a message first! No message ID available. 🔄');
       return;
     }
     if (!message) return;
     try {
-      const res = await axios.post(`${API_BASE}/accept-message/${msgId}`);  // Fixed: Use msgId (int) in URL
+      const res = await axios.post(`${API_BASE}/accept-message/${msgId}`);
       if (res.data.updated) {
         alert('Message marked as sent! 📤');
-        setMessage('');  // Clear for next
-        setMsgId(null);  // Fixed: Reset after accept
+        setMessage('');
+        setMsgId(null);
         setRoleDesc(DEFAULT_ROLE_DESC);
         setCta(DEFAULT_CTA);
       } else {
@@ -92,7 +92,6 @@ const MessageGenerator = () => {
       <h2 style={{ color: '#495057', marginBottom: 20 }}>✉️ Message Generator</h2>
       <p style={{ color: '#6c757d', marginBottom: 20 }}>Select a candidate from DB, customize role/CTA, generate personalized LinkedIn messages.</p>
 
-      {/* Candidates List */}
       <div style={{ 
         backgroundColor: '#fff', 
         padding: 20, 
@@ -135,7 +134,6 @@ const MessageGenerator = () => {
             Selected: {selectedCandidate.name} (ID: {selectedCandidate.linkedin_id}) | Skills: {selectedCandidate.skills}
           </p>
 
-          {/* Form */}
           <div style={{ 
             backgroundColor: '#fff', 
             padding: 20, 
@@ -177,7 +175,7 @@ const MessageGenerator = () => {
               {genLoading ? 'Generating...' : 'Generate Message ✉️'}
             </button>
             
-            {message && msgId && (  // Fixed: Show accept only if msgId exists
+            {message && msgId && (
               <>
                 <button 
                   onClick={acceptMessage}

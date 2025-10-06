@@ -4,12 +4,11 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:8000';
 
 const TrackingDashboard = () => {
-  const [candidateId, setCandidateId] = useState('');  // Default
+  const [candidateId, setCandidateId] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-  // Reply form state
   const [replyForm, setReplyForm] = useState({ msgId: null, response: '', show: false });
 
   const fetchMessages = async (id) => {

@@ -3,27 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import uvicorn
-from app.database import get_all_interactions, init_db, get_candidates, save_candidates
-from app.database import update_message_status, get_messages_for_candidate  # Added missing imports
+from app.database import (
+    get_all_interactions, init_db, get_candidates, save_candidates,
+    update_message_status, get_messages_for_candidate, update_response
+)
 from datetime import datetime
-from statistics import mean  # For avg response time
+from statistics import mean
 from fastapi.responses import StreamingResponse
 import csv
-from io import StringIO, BytesIO  # Updated: Added BytesIO for export
+from io import StringIO, BytesIO
 import os
 from dotenv import load_dotenv
-from app.nodes.search import search_linkedin  # Fixed import path
+from app.nodes.search import search_linkedin
 from app.nodes.message_generator import create_and_save_message
-from app.database import update_response
 
-load_dotenv()  # Load .env for EMAIL/PASSWORD
+load_dotenv()
 
 app = FastAPI(title="Message Generator API")
 
-origins = [
-    "http://localhost:3000"
-]
-
+origins = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -32,53 +30,51 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-init_db()  # Ensure DB ready on startup
+init_db()
 
 class CandidateData(BaseModel):
-    id: str  # linkedin_id
+    id: str
     name: str
-    experience: str | None = None  # Temp for message gen (not saved)
-    current_company: str | None = None  # Temp for message gen
-    role_desc: str | None = None  # New: Optional
-    cta: str | None = None  # New: Optional
+    experience: str | None = None
+    current_company: str | None = None
+    role_desc: str | None = None
+    cta: str | None = None
 
 class ResponseData(BaseModel):
     msg_id: int
     response: str
 
-# New: SearchConfig model (replaces dict=Body for validation)
 class SearchConfig(BaseModel):
     keywords: List[str] = ["AI Engineer"]
     location: str = ""
     company: str = ""
     min_exp: int = 0
-    max_results: int = 10  # Optional, pass to search if limiting cards
+    max_results: int = 10
 
 @app.post("/generate")
 async def generate_message(data: dict):
     try:
-        result = create_and_save_message(data)  # Returns {"id": msg_id, "message": "..."}
+        result = create_and_save_message(data)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/accept-message/{msg_id}")
-async def accept_message(msg_id: int):  # Fixed: Explicit int type (prevents string errors)
+async def accept_message(msg_id: int):
     try:
         updated = update_message_status(msg_id, 'sent')
         if not updated:
             raise HTTPException(status_code=404, detail="Message not found")
         return {"updated": True, "msg_id": msg_id, "status": "sent"}
     except Exception as e:
-        print(f"Accept error: {e}")  # Log for debug
+        print(f"Accept error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/track/{candidate_id}")
 def get_tracking(candidate_id: str) -> list[Dict[str, Any]]:
-    messages = get_messages_for_candidate(candidate_id)  # Now imported
+    messages = get_messages_for_candidate(candidate_id)
     if not messages:
-        print(f"No messages for candidate_id: {candidate_id}")  # Debug: Check console for mismatch
-    # Convert datetimes
+        print(f"No messages for candidate_id: {candidate_id}")
     for m in messages:
         if m['sent_date']:
             m['sent_date'] = m['sent_date'].isoformat() if hasattr(m['sent_date'], 'isoformat') else str(m['sent_date'])
@@ -88,13 +84,12 @@ def get_tracking(candidate_id: str) -> list[Dict[str, Any]]:
 
 @app.post("/update-response")
 def log_response(data: ResponseData):
-    update_response(data.msg_id, data.response)  # This now sets response_date and status internally
+    update_response(data.msg_id, data.response)
     return {"status": "updated"}
 
 @app.get("/interactions")
 def get_all_interactions_endpoint():
     interactions = get_all_interactions()
-    # Convert datetimes to ISO strings for JSON (handles None safely)
     for i in interactions:
         if i['sent_date']:
             i['sent_date'] = i['sent_date'].isoformat() if hasattr(i['sent_date'], 'isoformat') else str(i['sent_date'])
@@ -108,20 +103,15 @@ def get_effectiveness_metrics():
     total_sent = len(interactions)
     total_replies = sum(1 for i in interactions if i['response'] is not None)
     reply_rate = (total_replies / total_sent * 100) if total_sent > 0 else 0
-    
-    # Calculate avg response time (in days; only for replied messages with dates)
     response_times = []
     for i in interactions:
         if i['response'] and i['sent_date'] and i['response_date']:
-            # Parse datetimes (SQLite returns strings or datetime objects)
             sent_dt = datetime.fromisoformat(i['sent_date']) if isinstance(i['sent_date'], str) else i['sent_date']
             resp_dt = datetime.fromisoformat(i['response_date']) if isinstance(i['response_date'], str) else i['response_date']
             delta = resp_dt - sent_dt
-            days = delta.total_seconds() / (24 * 3600)  # Convert to days
+            days = delta.total_seconds() / (24 * 3600)
             response_times.append(days)
-    
     avg_response_time = mean(response_times) if response_times else 0
-    
     return {
         "total_messages_sent": total_sent,
         "total_replies": total_replies,
@@ -131,14 +121,10 @@ def get_effectiveness_metrics():
 
 @app.get("/export-report")
 def export_report():
-    """Updated Export: Remove 'Current Company'; use BytesIO + encode; candidate-report filename; handle short/empty preview."""
     interactions = get_all_interactions()
-    metrics = get_effectiveness_metrics()  # Reuse your metrics func (intact)
-    
+    metrics = get_effectiveness_metrics()
     output = StringIO()
     writer = csv.writer(output)
-    
-    # Header row with metrics summary (intact keys; rounded for display)
     writer.writerow([
         'Report Generated:', datetime.now().isoformat(),
         'Total Sent:', metrics['total_messages_sent'],
@@ -146,69 +132,46 @@ def export_report():
         'Reply Rate %:', f"{metrics['reply_rate_percent']}%",
         'Avg Response Time Days:', f"{metrics['avg_response_time_days']:.1f}"
     ])
-    writer.writerow([])  # Empty row for spacing
-    
-    # Data rows: All interactions (no Current Company; fixed preview/dates)
+    writer.writerow([])
     writer.writerow([
-        'Message ID', 'Candidate ID', 'Candidate Name',  # Updated: Removed 'Current Company'
+        'Message ID', 'Candidate ID', 'Candidate Name',
         'Message Preview', 'Sent Date', 'Response', 'Response Date', 'Status'
     ])
     for i in interactions:
-        # Updated: Handle preview (no '...' if short/empty)
         preview = (i['message'][:100] + '...') if i['message'] and len(i['message']) > 100 else (i['message'] or 'N/A')
-        
-        # Handle sent_date as string (SQLite format) or None (intact but robust)
         sent_str = str(i['sent_date']) if i['sent_date'] else 'N/A'
-        
-        # Handle response as string or None (intact)
         resp_str = i['response'] if i['response'] else 'N/A'
-        
-        # Handle response_date as string or None (intact)
         resp_date_str = str(i['response_date']) if i['response_date'] else 'N/A'
-        
         writer.writerow([
-            i['id'], i['candidate_id'], i['candidate_name'] or 'Unknown',  # Updated: No current_company
-            preview, sent_str, 
-            resp_str, resp_date_str, i['status'] or 'N/A'
+            i['id'], i['candidate_id'], i['candidate_name'] or 'Unknown',
+            preview, sent_str, resp_str, resp_date_str, i['status'] or 'N/A'
         ])
-    
     output.seek(0)
     csv_content = output.getvalue()
     return StreamingResponse(
-        BytesIO(csv_content.encode('utf-8')),  # Updated: BytesIO + encode for proper binary CSV
-        media_type="text/csv", 
-        headers={"Content-Disposition": f"attachment; filename=candidate-report-{datetime.now().strftime('%Y-%m-%d')}.csv"}  # Updated: Filename style
+        BytesIO(csv_content.encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=candidate-report-{datetime.now().strftime('%Y-%m-%d')}.csv"}
     )
 
-# Updated: POST /search with Pydantic model
 @app.post("/search")
 def perform_search(config: SearchConfig):
-    """Trigger LinkedIn search with filters, save profiles to DB."""
     try:
-        # Pass max_results if implemented in search.py (optional)
         config_dict = config.dict()
         if config.max_results:
-            config_dict['max_results'] = config.max_results  # Add to search_linkedin if limiting
-        
-        # Call your search.py function
-        profiles = search_linkedin(config_dict)  # config = {"keywords": [...], "location": "Venezuela", ...}
-        
-        # Save to DB (deduped, simplified)
+            config_dict['max_results'] = config.max_results
+        profiles = search_linkedin(config_dict)
         saved_count = save_candidates(profiles)
-        
-        # Fetch updated candidates for response (all saved, simplified)
         all_candidates = get_candidates()
-        
         return {
-            "profiles_found": profiles,  # Full for results preview
+            "profiles_found": profiles,
             "saved_to_db": saved_count,
             "total_candidates": len(all_candidates),
-            "candidates": all_candidates  # Simplified (no temp fields)
+            "candidates": all_candidates
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}. Check .env creds, CAPTCHA, or LinkedIn access.")
 
-# Existing: GET /candidates (simplified)
 @app.get("/candidates")
 def list_candidates():
     return get_candidates()

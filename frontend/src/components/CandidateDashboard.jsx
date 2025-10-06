@@ -4,11 +4,11 @@ import axios from 'axios';
 const API_BASE = 'http://localhost:8000';
 
 const CandidateDashboard = () => {
-  const [candidates, setCandidates] = useState([]);  // From /candidates (simplified)
-  const [interactions, setInteractions] = useState([]);  // For aggregation
-  const [metrics, setMetrics] = useState({});  // Overall stats
+  const [candidates, setCandidates] = useState([]); 
+  const [interactions, setInteractions] = useState([]);
+  const [metrics, setMetrics] = useState({});
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('');  // For search
+  const [filter, setFilter] = useState('');
 
   // Fetch metrics (unchanged)
   useEffect(() => {
@@ -17,7 +17,7 @@ const CandidateDashboard = () => {
         const res = await axios.get(`${API_BASE}/metrics`);
         setMetrics(res.data);
       } catch (err) {
-        console.error('Metrics fetch failed:', err);  // Silent fail; dashboard still works
+        console.error('Metrics fetch failed:', err);
       }
     };
     fetchMetrics();
@@ -28,19 +28,17 @@ const CandidateDashboard = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch simplified candidates
         const candRes = await axios.get(`${API_BASE}/candidates`);
         const sortedCandidates = candRes.data.sort((a, b) => b.relevance_score - a.relevance_score);
         setCandidates(sortedCandidates);
 
-        // Fetch interactions for aggregation (unchanged)
         const intRes = await axios.get(`${API_BASE}/interactions`);
         const aggregated = intRes.data.reduce((acc, interaction) => {
           const candId = interaction.candidate_id;  // linkedin_id
           if (!acc[candId]) {
             acc[candId] = {
               id: candId,
-              name: interaction.candidate_name || 'Unknown',  // Use first non-null
+              name: interaction.candidate_name || 'Unknown',
               current_company: interaction.current_company || 'Unknown',
               messages_sent: 0,
               replies_received: 0
@@ -49,7 +47,6 @@ const CandidateDashboard = () => {
           acc[candId].messages_sent += 1;
           if (interaction.response) {
             acc[candId].replies_received += 1;
-            // Update name/company if current is null (improve old data display)
             if (!acc[candId].name || acc[candId].name === 'Unknown') {
               acc[candId].name = interaction.candidate_name || acc[candId].name;
             }
@@ -69,7 +66,6 @@ const CandidateDashboard = () => {
     fetchData();
   }, []);
 
-  // Filter: Apply to both candidates & interactions (name or company; for candidates: name or skills)
   const filteredCandidates = candidates.filter(c =>
     c.name.toLowerCase().includes(filter.toLowerCase()) ||
     c.skills.toLowerCase().includes(filter.toLowerCase())
@@ -79,7 +75,6 @@ const CandidateDashboard = () => {
     c.current_company.toLowerCase().includes(filter.toLowerCase())
   );
 
-  // New: Handle CSV download (unchanged)
   const handleExport = () => {
     window.location.href = `${API_BASE}/export-report`;
   };
@@ -88,7 +83,6 @@ const CandidateDashboard = () => {
     <div style={{ maxWidth: 1000, margin: 'auto', padding: 20 }}>
       <h2>Candidate Dashboard</h2>
       
-      {/* Metrics Summary Card (unchanged) */}
       {Object.keys(metrics).length > 0 && (
         <div style={{ 
           marginBottom: 20, 
@@ -107,7 +101,6 @@ const CandidateDashboard = () => {
         </div>
       )}
       
-      {/* Search + Export Button Row */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
         <input
           type="text"
@@ -131,7 +124,6 @@ const CandidateDashboard = () => {
         </button>
       </div>
       
-      {/* New: Candidates Overview Table (Simplified from DB) */}
       <div style={{ marginBottom: 30 }}>
         <h3>Candidates Overview ({filteredCandidates.length}, Sorted by Relevance Score)</h3>
         {loading ? (
@@ -164,7 +156,6 @@ const CandidateDashboard = () => {
         )}
       </div>
 
-      {/* Existing: Interactions Table (Aggregated from Messages) */}
       <div>
         <h3>Interactions by Candidate ({filteredInteractions.length})</h3>
         {loading ? (
