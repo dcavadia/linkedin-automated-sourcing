@@ -55,22 +55,22 @@ class SearchConfig(BaseModel):
     max_results: int = 10  # Optional, pass to search if limiting cards
 
 @app.post("/generate")
-def generate_message(candidate: CandidateData) -> Dict[str, Any]:
+async def generate_message(data: dict):
     try:
-        result = create_and_save_message(candidate.dict(exclude_unset=True), candidate.role_desc, candidate.cta)
+        result = create_and_save_message(data)  # Returns {"id": msg_id, "message": "..."}
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/accept-message/{msg_id}")
-def accept_message(msg_id: int):
+async def accept_message(msg_id: int):  # Fixed: Explicit int type (prevents string errors)
     try:
         updated = update_message_status(msg_id, 'sent')
-        if updated:
-            return {"status": "accepted", "msg_id": msg_id, "updated": True}
-        else:
+        if not updated:
             raise HTTPException(status_code=404, detail="Message not found")
+        return {"updated": True, "msg_id": msg_id, "status": "sent"}
     except Exception as e:
+        print(f"Accept error: {e}")  # Log for debug
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/track/{candidate_id}")
@@ -210,6 +210,8 @@ def perform_search(config: SearchConfig):
 @app.get("/candidates")
 def list_candidates():
     return get_candidates()
+
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

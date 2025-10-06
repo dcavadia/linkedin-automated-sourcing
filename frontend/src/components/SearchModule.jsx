@@ -46,6 +46,7 @@ const SearchModule = () => {
         // Sort results by score DESC
         const sortedResults = (res.data.profiles_found || []).sort((a, b) => b.relevance_score - a.relevance_score);
         setResults(sortedResults);
+        alert(`Found ${sortedResults.length} candidates – saved to DB! 🔍 Use Message Generator next.`);
       }
     } catch (err) {
       setError('Search failed: ' + err.response?.data?.detail || err.message + '. Check console/backend logs.');
@@ -60,32 +61,42 @@ const SearchModule = () => {
   };
 
   return (
-    <div style={{ maxWidth: 800, margin: 'auto', padding: 20 }}>
-      <h2>LinkedIn Search Module (Using search.py)</h2>
-      <p>Configure filters and trigger search to find AI candidates. Results are saved to database. Use the Message Generator module for personalized outreach.</p>
+    <div style={{ maxWidth: 800, margin: 0 }}>
+      <h2 style={{ color: '#495057', marginBottom: 20 }}>🔍 LinkedIn Candidate Search</h2>
+      <p style={{ color: '#6c757d', marginBottom: 20 }}>Search for AI talent and save results to your database. Results auto-save for use in other modules.</p>
       
       {/* Filters Form (Grid Layout) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '1fr 1fr', 
+        gap: 10, 
+        marginBottom: 20, 
+        backgroundColor: '#fff', 
+        padding: 20, 
+        borderRadius: 8, 
+        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+        border: '1px solid #e9ecef'
+      }}>
         <input
           name="keywords"
           placeholder="Keywords (space-sep, e.g., AI Engineer ML)"
           value={config.keywords}
           onChange={handleConfigChange}
-          style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}
+          style={{ padding: 12, border: '1px solid #dee2e6', borderRadius: 6, fontSize: '14px' }}
         />
         <input
           name="location"
           placeholder="Location (e.g., Venezuela)"
           value={config.location}
           onChange={handleConfigChange}
-          style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}
+          style={{ padding: 12, border: '1px solid #dee2e6', borderRadius: 6, fontSize: '14px' }}
         />
         <input
           name="company"
           placeholder="Current Company (e.g., Google)"
           value={config.company}
           onChange={handleConfigChange}
-          style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}
+          style={{ padding: 12, border: '1px solid #dee2e6', borderRadius: 6, fontSize: '14px' }}
         />
         <input
           name="min_exp"
@@ -93,7 +104,7 @@ const SearchModule = () => {
           placeholder="Min Experience Years (default 2)"
           value={config.min_exp}
           onChange={handleConfigChange}
-          style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}
+          style={{ padding: 12, border: '1px solid #dee2e6', borderRadius: 6, fontSize: '14px' }}
         />
       </div>
       
@@ -101,48 +112,67 @@ const SearchModule = () => {
         onClick={handleSearch} 
         disabled={loading}
         style={{ 
-          padding: '10px 20px', 
-          backgroundColor: loading ? '#6c757d' : '#28a745', 
+          padding: '12px 24px', 
+          backgroundColor: loading ? '#6c757d' : '#007bff', 
           color: 'white', 
           border: 'none', 
-          borderRadius: 4, 
+          borderRadius: 6, 
           cursor: loading ? 'not-allowed' : 'pointer', 
+          fontSize: '16px',
           marginBottom: 20 
         }}
       >
-        {loading ? 'Searching LinkedIn...' : 'Start Search'}
+        {loading ? 'Searching LinkedIn...' : 'Start Search 🔍'}
       </button>
       
-      {error && <p style={{ color: 'red', marginBottom: 10 }}>{error}</p>}
+      {error && <p style={{ color: '#dc3545', marginBottom: 20, padding: 10, backgroundColor: '#f8d7da', borderRadius: 6, border: '1px solid #f5c6cb' }}>{error}</p>}
       
-      {/* Search Results Table (Full Profiles for Preview, Minimal Columns) */}
+      {/* Search Results Table */}
       {results.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <h3>Search Results ({results.length} Found, Sorted by Score)</h3>
-          <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f0f0f0' }}>
-                <th>Name</th>
-                <th>Skills</th>
-                <th>Relevance Score</th>
-                <th>Location</th>
-                <th>Profile URL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((profile, idx) => (
-                <tr key={idx}>
-                  <td>{profile.name}</td>
-                  <td>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
-                  <td>{profile.relevance_score}/100</td>
-                  <td>{profile.location}</td>
-                  <td><a href={profile.profile_url} target="_blank" rel="noopener noreferrer">View</a></td>
+        <div style={{ 
+          backgroundColor: '#fff', 
+          padding: 20, 
+          borderRadius: 8, 
+          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+          border: '1px solid #e9ecef'
+        }}>
+          <h3 style={{ color: '#495057', marginBottom: 15 }}>Search Results ({results.length} Found, Sorted by Score)</h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f8f9fa' }}>
+                  <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Name</th>
+                  <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Skills</th>
+                  <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Relevance Score</th>
+                  <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Location</th>
+                  <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>Profile URL</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {results.map((profile, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
+                    <td style={{ padding: 12 }}>{profile.name}</td>
+                    <td style={{ padding: 12 }}>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
+                    <td style={{ padding: 12 }}>{profile.relevance_score}/100</td>
+                    <td style={{ padding: 12 }}>{profile.location}</td>
+                    <td style={{ padding: 12 }}>
+                      <a 
+                        href={profile.profile_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        style={{ color: '#007bff', textDecoration: 'none' }}
+                      >
+                        View 🔗
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+      {results.length === 0 && !loading && <p style={{ color: '#6c757d', textAlign: 'center', padding: 40 }}>No results yet. Start a search! 🚀</p>}
     </div>
   );
 };
