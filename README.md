@@ -209,7 +209,7 @@ DB --> R
   - **Concurrency:** asyncio
 
 - **AI & Generation:**
-  - **Model:** OpenAI GPT-3.5-turbo for messages
+  - **Model:** OpenAI GPT-2 for messages
   - **Scoring:** Custom fuzzy matching & keyword analysis
 
 - **Data & Storage:**
