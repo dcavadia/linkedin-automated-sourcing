@@ -60,6 +60,13 @@ const SearchModule = () => {
     setConfig({ ...config, [name]: name === 'min_exp' ? parseInt(value) || 0 : value });
   };
 
+  // New: Helper to generate concise breakdown tooltip
+  const getBreakdownTooltip = (breakdown) => {
+    if (!breakdown || typeof breakdown !== 'object') return '';
+    const { keywords = 0, location = 0, company = 0, experience = 0, total } = breakdown;
+    return `Keywords:${keywords} + Location:${location} + Company:${company} + Experience:${experience} = ${total}`;
+  };
+
   return (
     <div style={{ maxWidth: 800, margin: 0 }}>
       <h2 style={{ color: '#495057', marginBottom: 20 }}>🔍 LinkedIn Candidate Search</h2>
@@ -149,24 +156,42 @@ const SearchModule = () => {
                 </tr>
               </thead>
               <tbody>
-                {results.map((profile, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
-                    <td style={{ padding: 12 }}>{profile.name}</td>
-                    <td style={{ padding: 12 }}>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
-                    <td style={{ padding: 12 }}>{profile.relevance_score}/100</td>
-                    <td style={{ padding: 12 }}>{profile.location}</td>
-                    <td style={{ padding: 12 }}>
-                      <a 
-                        href={profile.profile_url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        style={{ color: '#007bff', textDecoration: 'none' }}
-                      >
-                        View 🔗
-                      </a>
-                    </td>
-                  </tr>
-                ))}
+                {results.map((profile, idx) => {
+                  const tooltip = getBreakdownTooltip(profile.score_breakdown);  // New: Get tooltip
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
+                      <td style={{ padding: 12 }}>{profile.name}</td>
+                      <td style={{ padding: 12 }}>{Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills}</td>
+                      <td style={{ padding: 12 }}>
+                        {/* Updated: Add title tooltip for breakdown summary */}
+                        <span 
+                          title={tooltip} 
+                          style={{ 
+                            cursor: 'help', 
+                            fontWeight: 'bold',
+                            position: 'relative',
+                            display: 'inline-flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {profile.relevance_score}/100
+                          <span style={{ marginLeft: '4px', fontSize: '12px' }}>ℹ️</span>  {/* Visual cue */}
+                        </span>
+                      </td>
+                      <td style={{ padding: 12 }}>{profile.location}</td>
+                      <td style={{ padding: 12 }}>
+                        <a 
+                          href={profile.profile_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ color: '#007bff', textDecoration: 'none' }}
+                        >
+                          View 🔗
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

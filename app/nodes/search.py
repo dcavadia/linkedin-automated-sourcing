@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple  # Added Tuple
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -12,6 +12,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 import time
+import requests  # Added: For Nominatim geocoding (simple API)
+import difflib   # Added: Built-in for fuzzy fallback
 
 # Import database functions from parent directory
 import sys
@@ -75,74 +77,152 @@ def init_driver():
     time.sleep(3)
     return _driver
 
-def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, Any]) -> float:
-    """Calculate weighted relevance score (0-100) based on 4 filters with priorities."""
+def get_country_from_location(location: str) -> str | None:
+    """Simple Nominatim API to get country from location string (fallback to None)."""
+    if not location or location == 'n/a':
+        return None
+    try:
+        # Nominatim search (free, no key; limit=1)
+        url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(location)}&format=json&limit=1&addressdetails=1"
+        headers = {'User-Agent': 'LinkedInSearchApp/1.0'}  # Required by Nominatim
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return data[0].get('address', {}).get('country', '').lower()
+        return None
+    except Exception as e:
+        print(f"DEBUG: Geocoding failed for '{location}': {e} (using fuzzy fallback)")
+        return None
+
+def calculate_relevance_score(profile_data: Dict[str, Any], config: Dict[str, Any], full_description: str = '') -> Tuple[float, Dict[str, int]]:
+    """Calculate weighted relevance score (0-100) + breakdown. Updated weights: Keywords 50, Loc 20, Comp 20, Exp 10.
+    Uses full_description (headline + card_text) for lenient substring matching on keywords/company/exp."""
     headline = profile_data.get('headline', '').lower()
-    scraped_location = profile_data.get('location', '').lower()
+    scraped_location = profile_data.get('location', 'n/a').lower()  # Lower for matching (capitalized version used in output)
     scraped_company = profile_data.get('current_company', '').lower()
     est_exp = profile_data.get('experience_years', 3)
     base_keywords = ' '.join(config.get('keywords', ['AI Engineer'])).lower()
-    location_filter = config.get('location', '').lower()
-    company_filter = config.get('company', '').lower()
+    location_filter = config.get('location', '').lower().strip()
+    company_filter = config.get('company', '').lower().strip()
     min_exp = config.get('min_exp', 0)
 
+    # Use full_description if provided (lenient scanning); fallback to headline
+    desc_for_match = full_description.lower() if full_description else headline
+
     score = 0
+    breakdown = {'keywords': 0, 'location': 0, 'company': 0, 'experience': 0}  # Track pts for each
 
-    # Keywords (35 pts - high priority)
+    # Keywords (50 pts - high priority; full substring in desc → 50, any word → 25)
     keyword_words = base_keywords.split()
-    if base_keywords in headline:
-        score += 35  # Exact
-    elif any(word in headline for word in keyword_words):
-        score += 20  # Partial
-    keyword_pts = score
+    if base_keywords in desc_for_match:  # Substring containment in full desc
+        score += 50  # Full (e.g., "full stack" in "full stack developer...")
+        breakdown['keywords'] = 50
+        print(f"DEBUG: Keywords full match in desc: '{base_keywords}'")
+    elif any(word in desc_for_match for word in keyword_words):  # Any word in desc
+        score += 25  # Partial
+        breakdown['keywords'] = 25
+        print(f"DEBUG: Keywords partial match in desc: some words from '{base_keywords}'")
+    keyword_pts = breakdown['keywords']
 
-    # Location (35 pts - high priority, exact only)
+    # Location (20 pts - unchanged: exact/geocode/fuzzy on scraped_location.lower())
     loc_pts = 0
-    if location_filter:
+    if not location_filter:
+        loc_pts = 20  # No filter, full credit
+        breakdown['location'] = 20
+    else:
+        # Exact substring
         if location_filter in scraped_location:
-            loc_pts = 35  # Exact substring (e.g., "germany" in "kaiserslautern, germany")
-        # No fuzzy/partial – strict match only
-        score += loc_pts
-    else:
-        loc_pts = 35  # No filter, full credit
-
-    # Company (20 pts - medium priority)
-    comp_pts = 0
-    if company_filter:
-        if company_filter in scraped_company:
-            comp_pts = 20  # Exact
+            loc_pts = 20
+            breakdown['location'] = 20
+            print(f"DEBUG: Location exact match: '{location_filter}' in '{scraped_location}'")
         else:
-            # Simple fuzzy: variants like "corp", "inc" (kept as basic)
-            fuzzy_company = company_filter.replace(' ', '')  # e.g., "nvidia corp" -> "nvidiacorp"
-            if fuzzy_company in scraped_company.replace(' ', ''):
-                comp_pts = 10  # Partial
-        score += comp_pts
-    else:
-        comp_pts = 20  # No filter, full
+            # Geocode both to check same country (hierarchical; e.g., Caracas -> Venezuela)
+            filter_country = get_country_from_location(location_filter)
+            scraped_country = get_country_from_location(scraped_location)
+            if filter_country and scraped_country and filter_country == scraped_country:
+                loc_pts = 15  # Same country (city/country match)
+                breakdown['location'] = 15
+                print(f"DEBUG: Location country match: both '{filter_country}'")
+            elif filter_country == scraped_country:  # If one fails, check other
+                loc_pts = 15
+                breakdown['location'] = 15
+            else:
+                # Fallback: Fuzzy similarity (difflib; >70% → partial)
+                similarity = difflib.SequenceMatcher(None, location_filter, scraped_location).ratio()
+                if similarity > 0.7:
+                    loc_pts = 10  # Loose partial (e.g., spelling variations)
+                    breakdown['location'] = 10
+                    print(f"DEBUG: Location fuzzy match: {similarity:.2f} ({location_filter} ~ {scraped_location})")
+                else:
+                    loc_pts = 0
+                    breakdown['location'] = 0
+                    print(f"DEBUG: Location no match: '{location_filter}' vs '{scraped_location}' (sim: {similarity:.2f})")
+    score += loc_pts
 
-    # Experience (10 pts - low priority)
+    # Company (20 pts - medium priority; substring in desc → 20, fuzzy → 10)
+    comp_pts = 0
+    if not company_filter:
+        comp_pts = 20  # No filter, full
+        breakdown['company'] = 20
+    else:
+        if company_filter in desc_for_match:  # Substring in full desc (lenient)
+            comp_pts = 20  # Full
+            breakdown['company'] = 20
+            print(f"DEBUG: Company full match in desc: '{company_filter}'")
+        else:
+            # Fuzzy: space-removed version
+            fuzzy_company = company_filter.replace(' ', '')  # e.g., "google inc" -> "googleinc"
+            fuzzy_desc = desc_for_match.replace(' ', '')  # Apply to desc too
+            if fuzzy_company in fuzzy_desc:
+                comp_pts = 10  # Partial
+                breakdown['company'] = 10
+                print(f"DEBUG: Company fuzzy match: '{fuzzy_company}' in desc")
+            else:
+                comp_pts = 0
+                breakdown['company'] = 0
+                print(f"DEBUG: Company no match: '{company_filter}' vs desc")
+    score += comp_pts
+
+    # Experience (10 pts - low priority; enhanced regex/keywords in full desc)
     exp_pts = 0
+    full_text = full_description if full_description else (headline + ' ' + scraped_company)  # Use provided or fallback
     if min_exp == 0:
         exp_pts = 5  # Baseline if no filter
-    elif est_exp >= min_exp:
-        exp_pts = 10  # Full
-    elif est_exp >= (min_exp * 0.5) or 'senior' in headline or 'lead' in headline:
-        exp_pts = 5  # Partial
+        breakdown['experience'] = 5
+    else:
+        # Enhanced regex: Catches "5 years", "5+ years", "over 5 years", "5 yrs exp", etc.
+        years_match = re.search(r'(\d+(?:\+\s*)?)\s*(?:years?|yrs?|años?)(?:\s*(?:of\s+)?experience|exp)?', full_text)
+        if years_match:
+            matched_years = int(years_match.group(1).replace('+', ''))  # Handle "5+" as 5
+            est_exp = max(est_exp, matched_years)  # Update est if better match
+        if est_exp >= min_exp:
+            exp_pts = 10  # Full
+            breakdown['experience'] = 10
+            print(f"DEBUG: Experience full: {est_exp} >= {min_exp}")
+        elif est_exp >= (min_exp * 0.5) or any(word in full_text for word in ['senior', 'lead', 'principal', 'experienced', 'expert']):
+            exp_pts = 5  # Partial (half or keywords)
+            breakdown['experience'] = 5
+            print(f"DEBUG: Experience partial: {est_exp} or keywords in desc")
+        else:
+            exp_pts = 0
+            breakdown['experience'] = 0
+            print(f"DEBUG: Experience no match: {est_exp} < {min_exp}")
     score += exp_pts
 
     total_score = round(score, 1)
+    breakdown['total'] = total_score  # Include total in breakdown
     print(f"DEBUG: Score calc - Keywords:{keyword_pts}, Loc:{loc_pts}, Comp:{comp_pts}, Exp:{exp_pts} → Total: {total_score}/100")
-    return total_score
-
+    return total_score, breakdown  # Return breakdown for API
 
 def estimate_experience(headline: str, card_text: str, min_exp: int) -> int:
-    """Estimate years from headline/card text (enhanced for reliability)."""
+    """Estimate years from headline/card text (enhanced for reliability; called before scoring)."""
     full_text = headline + ' ' + card_text
-    # Regex for years (improved)
-    years_match = re.search(r'(\d+)\s*(?:years?|años|yr|yrs)', full_text)
+    # Regex for years (improved, but scoring uses even better version)
+    years_match = re.search(r'(\d+(?:\+\s*)?)\s*(?:years?|años|yr|yrs)', full_text)
     if years_match:
-        return int(years_match.group(1))
-    # Fuzzy words (expanded)
+        return int(years_match.group(1).replace('+', ''))
+    # Keyword fallbacks (expanded)
     if any(word in full_text for word in ['senior', 'lead', 'principal']):
         return max(7, min_exp)  # Assume 7+ for senior roles
     if any(word in full_text for word in ['mid', 'intermediate']):
@@ -251,7 +331,8 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 for div in t14_divs:
                     classes = div.get('class', [])
                     if classes and 't-normal' in ' '.join(classes) and 't-black' not in ' '.join(classes):
-                        scraped_location = div.get_text(strip=True).lower()
+                        scraped_location_raw = div.get_text(strip=True).lower()  # Lower for matching
+                        scraped_location = scraped_location_raw.title()  # New: Capitalize for display (e.g., "venezuela" → "Venezuela")
                         break
 
             # Fallback if no t14_divs: Use full card text snippets
@@ -261,9 +342,9 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
             print(f"DEBUG: Candidate {i+1} ({name}): Headline '{headline[:50]}...'")
 
-            print(f"DEBUG: Candidate {i+1} location: '{scraped_location}'")
+            print(f"DEBUG: Candidate {i+1} location: '{scraped_location}'")  # Now capitalized
 
-            # Current company: Parse from headline (e.g., after "at " or "|") - for scoring only
+            # Current company: Parse from headline (e.g., after "at " or "|") - for scoring only (but now desc uses full card_text)
             scraped_company = 'N/A'
             if ' at ' in headline:
                 scraped_company = headline.split(' at ')[-1].split(' |')[0].split(' ·')[0].strip()
@@ -276,20 +357,23 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             scraped_company = scraped_company.lower().replace(',', '')  # Clean
             print(f"DEBUG: Candidate {i+1} company: '{scraped_company}'")
 
-            # Exp: Enhanced estimation - for scoring only
+            # Full card text for lenient matching
             card_text = card.get_text()
+            full_description = headline + ' ' + card_text  # For keywords/company/exp scanning
+
+            # Exp: Initial estimation (scoring refines it)
             exp_years = estimate_experience(headline, card_text, min_exp)
 
-            # Temp profile data for scoring
+            # Temp profile data for scoring (use lowercased location for matching)
             temp_data = {
                 'headline': headline,
-                'location': scraped_location,
+                'location': scraped_location.lower(),  # Lower for scoring/geocoding
                 'current_company': scraped_company,
                 'experience_years': exp_years
             }
 
-            # Calculate score
-            relevance_score = calculate_relevance_score(temp_data, config)
+            # Calculate score (now pass full_description for lenient checks)
+            relevance_score, score_breakdown = calculate_relevance_score(temp_data, config, full_description)
 
             print(f"DEBUG: Candidate {i+1} ({name}) relevance score: {relevance_score}/100")
 
@@ -297,16 +381,17 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             linkedin_id_raw = profile_url.split('/in/')[-1].split('/')[0] if '/in/' in profile_url else f'candidate_{i+1}'
             linkedin_id = linkedin_id_raw.split('?')[0]  # Remove "?miniProfileUrn..."
 
-            # Always add to pool with score (full for now; subset saved)
+            # Always add to pool with score (full for now; subset saved) + breakdown (new, for API only)
             profiles.append({
                 'id': linkedin_id,  # Now clean linkedin_id
                 'name': name,
                 'skills': [base_keywords],
                 'experience_years': exp_years,  # Internal only
-                'location': scraped_location,  # Internal only
+                'location': scraped_location,  # New: Capitalized for display
                 'current_company': scraped_company,  # Internal only
                 'profile_url': profile_url,
-                'relevance_score': relevance_score
+                'relevance_score': relevance_score,
+                'score_breakdown': score_breakdown  # For frontend summary (not saved to DB)
             })
 
         except Exception as e:
@@ -318,7 +403,7 @@ def search_linkedin(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Sort by score descending for frontend
     profiles.sort(key=lambda x: x['relevance_score'], reverse=True)
     
-    # Save to DB (subset only)
+    # Save to DB (subset only) – no breakdown in DB, but location capitalized there too
     saved = save_candidates(profiles)
     print(f"DEBUG: Saved {saved} new candidates to database.")
     

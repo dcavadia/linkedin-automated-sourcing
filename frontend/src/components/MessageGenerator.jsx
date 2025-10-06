@@ -38,7 +38,7 @@ const MessageGenerator = () => {
     setError('');
     try {
       const postData = {
-        id: selectedCandidate.linkedin_id || selectedCandidate.id,
+        id: selectedCandidate.linkedin_id,  // Use linkedin_id (username)
         name: selectedCandidate.name,
         experience: `AI Engineer based on skills: ${selectedCandidate.skills}`,
         current_company: selectedCandidate.current_company || 'N/A',
@@ -122,7 +122,7 @@ const MessageGenerator = () => {
                   cursor: 'pointer'
                 }}
               >
-                {cand.name} – {cand.skills} (Score: {cand.relevance_score})
+                {cand.name} {cand.linkedin_id ? `– ID: ${cand.linkedin_id}` : ''} – {cand.skills} (Score: {cand.relevance_score})
               </button>
             ))}
           </div>
