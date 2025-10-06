@@ -76,6 +76,8 @@ def accept_message(msg_id: int):
 @app.get("/track/{candidate_id}")
 def get_tracking(candidate_id: str) -> list[Dict[str, Any]]:
     messages = get_messages_for_candidate(candidate_id)  # Now imported
+    if not messages:
+        print(f"No messages for candidate_id: {candidate_id}")  # Debug: Check console for mismatch
     # Convert datetimes
     for m in messages:
         if m['sent_date']:

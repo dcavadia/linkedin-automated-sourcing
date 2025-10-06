@@ -1,94 +1,92 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:8000';
 
 const TrackingDashboard = () => {
-  const [candidateId, setCandidateId] = useState('');
+  const [candidateId, setCandidateId] = useState('carloschaparrosaenz');  // Default to your example; user can change
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const fetchMessages = async () => {
-    if (!candidateId) return;
+  const fetchMessages = async (id) => {
+    if (!id.trim()) {
+      setError('Enter a valid candidate ID.');
+      setMessages([]);
+      return;
+    }
     setLoading(true);
+    setError('');
     try {
-      const res = await axios.get(`${API_BASE}/track/${candidateId}`);
-      // Format dates if ISO strings
-      const formatted = (res.data || []).map(msg => ({
-        ...msg,
-        sent_date: msg.sent_date ? new Date(msg.sent_date).toLocaleString() : 'Not Sent Yet',
-        response_date: msg.response_date ? new Date(msg.response_date).toLocaleString() : 'N/A'
-      }));
-      setMessages(formatted);
+      const res = await axios.get(`${API_BASE}/track/${id.trim()}`);
+      setMessages(res.data);  // Expects [] or array of messages
     } catch (err) {
-      alert('Error fetching messages: ' + err.message);
+      setError('Failed to fetch tracking data: ' + (err.response?.data?.detail || err.message));
+      setMessages([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpdateResponse = async (msgId) => {
-    const responseText = prompt('Enter candidate response for this message:');
-    if (!responseText) return;
-    try {
-      await axios.post(`${API_BASE}/update-response`, { msg_id: msgId, response: responseText });
-      await fetchMessages(); // refresh
-      alert('Response logged and status updated to replied!');
-    } catch (err) {
-      alert('Error updating response: ' + err.message);
-    }
+  // Auto-fetch on mount with default ID
+  useEffect(() => {
+    fetchMessages(candidateId);
+  }, []);
+
+  const handleIdChange = (e) => {
+    const newId = e.target.value;
+    setCandidateId(newId);
+    fetchMessages(newId);  // Fetch on change for real-time
   };
 
   return (
     <div style={{ maxWidth: 800, margin: 'auto', padding: 20 }}>
       <h2>Candidate Message Tracking</h2>
+      <p>Enter the exact candidate ID (linkedin_id) used in generation (e.g., from Search results or Generator input).</p>
+      
+      {/* ID Input */}
       <input
         type="text"
-        placeholder="Enter Candidate ID (e.g., carlosalfonsochaparosaenz)"
+        placeholder="Candidate ID (e.g., carloschaparrosaenz)"
         value={candidateId}
-        onChange={(e) => setCandidateId(e.target.value)}
-        style={{ padding: 8, width: '300px', border: '1px solid #ccc', borderRadius: 4, marginRight: 10 }}
+        onChange={handleIdChange}
+        style={{ display: 'block', marginBottom: 20, padding: 8, width: '100%', border: '1px solid #ccc', borderRadius: 4 }}
       />
-      <button onClick={fetchMessages} disabled={loading || !candidateId} style={{ padding: '8px 16px', backgroundColor: (loading || !candidateId) ? '#6c757d' : '#007bff', color: 'white', border: 'none', borderRadius: 4 }}>
-        {loading ? 'Loading...' : 'Load Messages'}
-      </button>
-
-      {messages.length > 0 && (
-        <table border="1" cellPadding="5" style={{ marginTop: 20, width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f0f0f0' }}>
-              <th>ID</th>
-              <th>Message Preview</th>
-              <th>Status</th>
-              <th>Sent Date</th>
-              <th>Response</th>
-              <th>Response Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {messages.map((msg) => (
-              <tr key={msg.id}>
-                <td>{msg.id}</td>
-                <td>{msg.message ? (msg.message.length > 50 ? msg.message.substring(0, 50) + '...' : msg.message) : 'N/A'}</td>
-                <td><strong>{msg.status || 'generated'}</strong></td>  {/* Highlight status */}
-                <td>{msg.sent_date}</td>
-                <td>{msg.response || 'None'}</td>
-                <td>{msg.response_date}</td>
-                <td>
-                  {msg.status !== 'replied' && (  // Only if not replied
-                    <button onClick={() => handleUpdateResponse(msg.id)} style={{ padding: '4px 8px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: 2 }}>
-                      Log Response
-                    </button>
-                  )}
-                </td>
+      
+      {loading && <p style={{ color: 'blue' }}>Loading messages...</p>}
+      {error && <p style={{ color: 'red', marginBottom: 10 }}>{error}</p>}
+      
+      {/* Messages Table or Empty Message */}
+      {messages.length === 0 ? (
+        <p>No messages found for this candidate (ID: {candidateId}). Generate and accept one first via Search or Generator module.</p>
+      ) : (
+        <div>
+          <h3>Messages for {candidateId} ({messages.length} found)</h3>
+          <table border="1" cellPadding="8" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f0f0f0' }}>
+                <th>Message ID</th>
+                <th>Status</th>
+                <th>Message Preview</th>
+                <th>Sent Date</th>
+                <th>Response</th>
+                <th>Response Date</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {messages.length === 0 && !loading && candidateId && (
-        <p style={{ marginTop: 20 }}>No messages found for this candidate (ID: {candidateId}). Generate and accept one first via Search or Generator module.</p>
+            </thead>
+            <tbody>
+              {messages.map((msg, idx) => (
+                <tr key={idx}>
+                  <td>{msg.id}</td>
+                  <td>{msg.status || 'N/A'}</td>
+                  <td>{(msg.message || '').substring(0, 100)}...</td>
+                  <td>{msg.sent_date || 'N/A'}</td>
+                  <td>{msg.response || 'N/A'}</td>
+                  <td>{msg.response_date || 'N/A'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
