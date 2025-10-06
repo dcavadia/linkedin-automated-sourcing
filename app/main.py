@@ -9,7 +9,7 @@ from datetime import datetime
 from statistics import mean  # For avg response time
 from fastapi.responses import StreamingResponse
 import csv
-from io import StringIO
+from io import StringIO, BytesIO  # Updated: Added BytesIO for export
 import os
 from dotenv import load_dotenv
 from app.nodes.search import search_linkedin  # Fixed import path
@@ -131,51 +131,53 @@ def get_effectiveness_metrics():
 
 @app.get("/export-report")
 def export_report():
+    """Updated Export: Remove 'Current Company'; use BytesIO + encode; candidate-report filename; handle short/empty preview."""
     interactions = get_all_interactions()
-    metrics = get_effectiveness_metrics()  # Reuse your metrics func (safe)
+    metrics = get_effectiveness_metrics()  # Reuse your metrics func (intact)
     
     output = StringIO()
     writer = csv.writer(output)
     
-    # Header row with metrics summary (unchanged; datetime.now() is a datetime object)
+    # Header row with metrics summary (intact keys; rounded for display)
     writer.writerow([
         'Report Generated:', datetime.now().isoformat(),
         'Total Sent:', metrics['total_messages_sent'],
         'Total Replies:', metrics['total_replies'],
         'Reply Rate %:', f"{metrics['reply_rate_percent']}%",
-        'Avg Response Time Days:', metrics['avg_response_time_days']
+        'Avg Response Time Days:', f"{metrics['avg_response_time_days']:.1f}"
     ])
     writer.writerow([])  # Empty row for spacing
     
-    # Data rows: All interactions (fixed date handling)
+    # Data rows: All interactions (no Current Company; fixed preview/dates)
     writer.writerow([
-        'Message ID', 'Candidate ID', 'Candidate Name', 'Current Company', 
+        'Message ID', 'Candidate ID', 'Candidate Name',  # Updated: Removed 'Current Company'
         'Message Preview', 'Sent Date', 'Response', 'Response Date', 'Status'
     ])
     for i in interactions:
-        preview = (i['message'][:100] + '...') if i['message'] else 'N/A'
+        # Updated: Handle preview (no '...' if short/empty)
+        preview = (i['message'][:100] + '...') if i['message'] and len(i['message']) > 100 else (i['message'] or 'N/A')
         
-        # Fixed: Handle sent_date as string (SQLite format) or None
+        # Handle sent_date as string (SQLite format) or None (intact but robust)
         sent_str = str(i['sent_date']) if i['sent_date'] else 'N/A'
         
-        # Fixed: Handle response as string or None
+        # Handle response as string or None (intact)
         resp_str = i['response'] if i['response'] else 'N/A'
         
-        # Fixed: Handle response_date as string or None
+        # Handle response_date as string or None (intact)
         resp_date_str = str(i['response_date']) if i['response_date'] else 'N/A'
         
         writer.writerow([
-            i['id'], i['candidate_id'], i['candidate_name'] or 'Unknown', 
-            i['current_company'] or 'Unknown', preview, sent_str, 
+            i['id'], i['candidate_id'], i['candidate_name'] or 'Unknown',  # Updated: No current_company
+            preview, sent_str, 
             resp_str, resp_date_str, i['status'] or 'N/A'
         ])
     
     output.seek(0)
     csv_content = output.getvalue()
     return StreamingResponse(
-        iter([csv_content]), 
+        BytesIO(csv_content.encode('utf-8')),  # Updated: BytesIO + encode for proper binary CSV
         media_type="text/csv", 
-        headers={"Content-Disposition": f"attachment; filename=linkedin_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"}
+        headers={"Content-Disposition": f"attachment; filename=candidate-report-{datetime.now().strftime('%Y-%m-%d')}.csv"}  # Updated: Filename style
     )
 
 # Updated: POST /search with Pydantic model
@@ -210,8 +212,6 @@ def perform_search(config: SearchConfig):
 @app.get("/candidates")
 def list_candidates():
     return get_candidates()
-
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
